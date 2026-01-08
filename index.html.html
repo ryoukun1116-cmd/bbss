@@ -1,0 +1,235 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>提示版</title>
+  <style>
+    body {
+      margin: 0;
+      font-family: -apple-system, BlinkMacSystemFont, "Helvetica Neue", Arial, sans-serif;
+      background-image: url('https://images.unsplash.com/photo-1441974231531-c6227db76b6e');
+      background-size: cover;
+      background-attachment: fixed;
+    }
+    header {
+      position: sticky;
+      top: 0;
+      background: #2f2f2f;
+      color: #fff;
+      padding: 10px;
+      text-align: center;
+      font-weight: bold;
+      z-index: 10;
+    }
+    header button { font-size: 12px; margin-left: 6px; }
+    .container {
+      max-width: 900px;
+      margin: 10px auto;
+      padding: 8px;
+      background: rgba(255,255,255,0.9);
+      border-radius: 8px;
+    }
+    .post {
+      background: #fff;
+      margin-bottom: 10px;
+      padding: 10px;
+      border-left: 5px solid #2f2f2f;
+    }
+    .meta { font-size: 12px; color: #006600; margin-bottom: 4px; }
+    .content { white-space: pre-wrap; word-break: break-word; }
+    .anchor { color: #0000ee; cursor: pointer; }
+    .admin-tools { display: none; margin-top: 6px; }
+    body.admin .admin-tools { display: block; }
+    .form {
+      position: fixed; bottom: 0; left: 0; width: 100%;
+      background: #ddd; padding: 8px; border-top: 1px solid #bbb;
+    }
+    textarea { width: 100%; height: 70px; }
+    .spacer { height: 170px; }
+    .board-list button, .thread-list button { width: 100%; margin-bottom: 6px; }
+    .thread-create { margin-bottom: 10px; }
+  </style>
+</head>
+<body>
+<header>
+  提示版
+  <button id="adminBtn">管理人</button>
+  <button id="lockBtn" style="display:none">スレ停止</button>
+</header>
+
+<div class="container" id="view"></div>
+<div class="spacer"></div>
+
+<div class="form" id="form">
+  <input id="username" placeholder="名前（空欄で匿名）" style="width:100%;margin-bottom:4px;">
+  <textarea id="message" placeholder="本文"></textarea>
+  <button onclick="post()">書き込む</button>
+</div>
+
+<script>
+const ADMIN_PASSWORD = 'admin123';
+let isAdmin = false;
+let locked = false;
+
+let data = JSON.parse(localStorage.getItem('bbsData')) || {
+  boards: {
+    雑談: { threads: { 'テストスレ': [] } }
+  }
+};
+
+let currentBoard = null;
+let currentThread = null;
+
+const view = document.getElementById('view');
+const lockBtn = document.getElementById('lockBtn');
+
+function save(){ localStorage.setItem('bbsData', JSON.stringify(data)); }
+
+function showBoards(){
+  currentBoard = null;
+  currentThread = null;
+  view.innerHTML = `
+    <h3>板一覧</h3>
+    <div class="board-create">
+      <input id="newBoardName" placeholder="新しい板名（10文字以内）">
+      <button onclick="createBoard()">板を作る</button>
+      <div style="font-size:12px;color:#666">※ 1時間に1板まで / 記号のみ不可</div>
+    </div>
+  ` + Object.keys(data.boards)
+    .map(b=>`<div class="board-list"><button onclick="showThreads('${b}')">${b}</button></div>`)
+    .join('');
+  lockBtn.style.display = 'none';
+  document.getElementById('form').style.display = 'none';
+}
+
+
+function createBoard(){
+  const title = document.getElementById('newBoardTitle').value.trim();
+  if(!title) return;
+  if(data.boards[title]) return alert('同名の板があります');
+  data.boards[title] = { threads: {} };
+  save();
+  showBoards();
+}
+
+function showThreads(board){
+  currentBoard = board;
+  currentThread = null;
+  view.innerHTML = `
+    <button onclick="showBoards()">← 板一覧に戻る</button>
+    <h3>${board}</h3>
+    <div class="thread-create">
+      <input id="newThreadTitle" placeholder="新しいスレッド名">
+      <button onclick="createThread()">スレ立て</button>
+    </div>
+  ` + Object.keys(data.boards[board].threads)
+      .map(t=>`<div class="thread-list"><button onclick="openThread('${t}')">${t}</button></div>`)
+      .join('');
+  lockBtn.style.display = 'none';
+  document.getElementById('form').style.display = 'none';
+}
+
+function openThread(thread){
+  currentThread = thread;
+  const posts = data.boards[currentBoard].threads[thread];
+  view.innerHTML = `<button onclick="showThreads('${currentBoard}')">← スレ一覧に戻る</button><h3>${thread}</h3>` +
+    posts.map((p,i)=>
+      `<div class="post" id="p${i+1}">`+
+      `<div class="meta">${i+1} ：${p.name || '名無しさん＠お腹いっぱい'} ：${p.time} ID:${p.id}</div>`+
+      `<div class="content">${p.deleted ? 'あぼーん（管理人により削除）' : p.text.replace(/>>(\d+)/g,'<span class="anchor" onclick="jump($1)">&gt;&gt;$1</span>')}</div>`+
+      `<div class="admin-tools"><button onclick="delPost(${i})">削除</button></div>`+
+      `</div>`
+    ).join('');
+  lockBtn.style.display = isAdmin ? 'inline' : 'none';
+  document.getElementById('form').style.display = locked ? 'none' : 'block';
+}
+
+function jump(n){ location.hash = '#p'+n; }
+
+function post(){
+  if(locked) return alert('このスレは停止されています');
+  const text = message.value.trim();
+  if(!text) return;
+  const name = document.getElementById('username').value.trim();
+  data.boards[currentBoard].threads[currentThread].push({
+    deleted: false,
+    name,
+    text,
+    time: new Date().toLocaleString(),
+    id: Math.random().toString(36).slice(2,10)
+  });
+  save();
+  message.value='';
+  document.getElementById('username').value='';
+  openThread(currentThread);
+}
+
+function createThread(){
+  if(!currentBoard) return alert('板を選択してください');
+  const title = document.getElementById('newThreadTitle').value.trim();
+  if(!title) return;
+  if(title.length > 20) return alert('スレ名は20文字以内');
+  if(data.boards[currentBoard].threads[title]) return alert('同名スレがあります');
+  data.boards[currentBoard].threads[title] = [];
+  save();
+  showThreads(currentBoard);
+}
+
+// ===== 板作成制限 =====
+function createBoard(){
+  const name = document.getElementById('newBoardName').value.trim();
+  if(!name) return;
+  if(name.length > 10) return alert('板名は10文字以内');
+  if(!/[一-龠ぁ-んァ-ンa-zA-Z0-9]/.test(name)) return alert('記号のみの板名は禁止');
+  if(data.boards[name]) return alert('同名の板があります');
+
+  const last = localStorage.getItem('lastBoardTime');
+  const now = Date.now();
+  if(last && now - Number(last) < 3600000){
+    return alert('板作成は1時間に1回までです');
+  }
+
+  data.boards[name] = { threads: {} };
+  localStorage.setItem('lastBoardTime', now);
+  save();
+  showBoards();
+}
+
+function delPost(i){
+  if(!isAdmin) return;
+  if(!confirm('削除しますか？')) return;
+  data.boards[currentBoard].threads[currentThread][i].deleted = true;
+  save();
+  openThread(currentThread);
+}
+
+adminBtn.onclick = ()=>{
+  const p = prompt('管理人パスワード');
+  if(p===ADMIN_PASSWORD){
+    isAdmin = !isAdmin;
+    document.body.classList.toggle('admin');
+    alert(isAdmin?'管理人ON':'管理人OFF');
+    if(currentThread) openThread(currentThread);
+  }
+};
+
+lockBtn.onclick = ()=>{
+  locked = !locked;
+  alert(locked?'スレ停止':'スレ再開');
+  document.getElementById('form').style.display = locked?'none':'block';
+};
+
+showBoards();
+</script>
+const firebaseConfig = {
+  apiKey: "AIzaSyCLMWPp5StBWXW-nkWyHbPAaXbNUTOjxoQ",
+  authDomain: "bbs1116-ed2fd.firebaseapp.com",
+  projectId: "bbs1116-ed2fd",
+  storageBucket: "bbs1116-ed2fd.firebasestorage.app",
+  messagingSenderId: "100048786948",
+  appId: "1:100048786948:web:2e2952bd91d51f9e3e0751"
+};
+
+</body>
+</html>
